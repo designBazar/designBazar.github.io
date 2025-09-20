@@ -4,80 +4,67 @@
   <meta charset="UTF-8">
   <title>CapCut Auto Extract</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    pre { background:#f4f4f4; padding:1rem; white-space:pre-wrap; }
-  </style>
 </head>
 <body>
-<pre id="result">Loading…</pre>
-
 <script>
 const proxy = "https://corsproxy.io/?url=";
 
-// Build CapCut URL from the query (?id=...)
+// ---- Get the template id from ?id=... ----
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
-const targetUrl = id
-  ? `https://www.capcut.com/tv2/${id}/`
-  : "";
+if (!id) {
+  console.error("Missing ?id=");
+} else {
+  const targetUrl = `https://www.capcut.com/tv2/${id}/`;
 
-async function fetchHTML(url) {
-  const res = await fetch(proxy + encodeURIComponent(url));
-  if (!res.ok) throw new Error(res.statusText);
-  const type = res.headers.get("content-type") || "";
-  if (type.includes("application/json")) {
-    const j = await res.json();
-    return j.contents || j.body || "";
+  async function fetchHTML(url) {
+    const res = await fetch(proxy + encodeURIComponent(url));
+    if (!res.ok) throw new Error(res.statusText);
+    const type = res.headers.get("content-type") || "";
+    if (type.includes("application/json")) {
+      const j = await res.json();
+      return j.contents || j.body || "";
+    }
+    return await res.text();
   }
-  return await res.text();
+
+  function parse(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const out = {};
+
+    // Section 1: deeplink or og:url
+    const apple = doc.querySelector('meta[name="apple-itunes-app"]');
+    const ogUrl = doc.querySelector('meta[property="og:url"]');
+    if (apple && apple.content.includes("capcut://")) {
+      const m = apple.content.match(/app-argument=([^,&"]+)/);
+      out.deeplink = m ? decodeURIComponent(m[1]) : apple.content;
+    } else if (ogUrl) {
+      out.deeplink = ogUrl.content;
+    }
+
+    // Section 2: video
+    const ogV = doc.querySelector('meta[property="og:video:url"]');
+    const ogVS = doc.querySelector('meta[property="og:video:secure_url"]');
+    const vid = doc.querySelector("video");
+    out.video = ogV?.content || ogVS?.content || vid?.getAttribute("src") || null;
+
+    // Section 3: poster
+    const ogImg = doc.querySelector('meta[property="og:image"]');
+    out.poster = ogImg?.content || vid?.getAttribute("poster") || null;
+
+    return out;
+  }
+
+  (async () => {
+    try {
+      const html = await fetchHTML(targetUrl);
+      const data = parse(html);
+      console.log(JSON.stringify(data, null, 2));
+    } catch (err) {
+      console.error("Error:", err.message);
+    }
+  })();
 }
-
-function parse(html) {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const out = {};
-
-  // deeplink or og:url
-  const apple = doc.querySelector('meta[name="apple-itunes-app"]');
-  const ogUrl = doc.querySelector('meta[property="og:url"]');
-  if (apple && apple.content.includes("capcut://")) {
-    const m = apple.content.match(/app-argument=([^,&"]+)/);
-    out.deeplink = m ? decodeURIComponent(m[1]) : apple.content;
-  } else if (ogUrl) {
-    out.deeplink = ogUrl.content;
-  }
-
-  // video
-  const ogV = doc.querySelector('meta[property="og:video:url"]');
-  const ogVS = doc.querySelector('meta[property="og:video:secure_url"]');
-  const vid = doc.querySelector("video");
-  out.video = ogV?.content || ogVS?.content || vid?.getAttribute("src") || null;
-
-  // poster
-  const ogImg = doc.querySelector('meta[property="og:image"]');
-  out.poster = ogImg?.content || vid?.getAttribute("poster") || null;
-
-  return out;
-}
-
-(async () => {
-  const resultEl = document.getElementById("result");
-
-  if (!id) {
-    resultEl.textContent = "Error: Missing ?id parameter";
-    return;
-  }
-
-  try {
-    const html = await fetchHTML(targetUrl);
-    const data = parse(html);
-    const json = JSON.stringify(data);   // <-- plain JSON string (no formatting)
-    console.log(json);
-    resultEl.textContent = json;
-  } catch (err) {
-    resultEl.textContent = "Error: " + err.message;
-  }
-})();
 </script>
 </body>
 </html>
